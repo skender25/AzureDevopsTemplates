@@ -1,0 +1,290 @@
+# Starter pipeline
+# Start with a minimal pipeline that you can customize to build and deploy your code.
+# Add steps that build, run tests, deploy, and more:
+# https://aka.ms/yaml
+parameters:
+- name: parm_apply
+  type: boolean
+  default: False
+- name: parm_terraform_main_folder
+  type: string
+  default: "tfdevops"
+- name: parm_terraform_post_folder
+  type: string
+  default: "post-tfdevops"
+- name: user
+  type: string
+  default: ' '
+steps:
+- checkout: self
+  clean: true  
+- task: replacetokens@3
+  displayName: '${{parameters.parm_terraform_main_folder}}: Replace Tokens  in tfvars files'
+  inputs:
+    targetFiles: "$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_main_folder}}/*.tfvars"
+    encoding: 'auto'
+    writeBOM: true
+    actionOnMissing: 'fail'
+    keepToken: false
+    tokenPrefix: '#{'
+    tokenSuffix: '}#'
+    useLegacyPattern: false
+    enableTelemetry: true 
+  env:
+    SYSTEM_ACCESSTOKEN: $(System.AccessToken) 
+    SYSTEM_COLLECTION_URI: $(System.CollectionUri) 
+    PROJECT_ID: $(project_id) 
+- task: CmdLine@2
+  displayName: '${{parameters.parm_terraform_main_folder}}: Change current folder to ${{parameters.parm_terraform_main_folder}}'
+  inputs:
+    script: 'cd $(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_main_folder}}'
+- task: CmdLine@2
+  displayName: '${{parameters.parm_terraform_main_folder}}: Terraform init' 
+  inputs:
+    script: 'terraform init'
+    workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_main_folder}}'
+- task: CmdLine@2
+  displayName: '${{parameters.parm_terraform_main_folder}}: Terraform validate'
+  inputs:
+    script: 'terraform validate'
+    workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_main_folder}}'
+- task: CmdLine@2
+  displayName: '${{parameters.parm_terraform_main_folder}}: Terraform plan'
+  inputs:
+    script: 'terraform plan'
+    workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_main_folder}}'
+- ${{ if eq(parameters.parm_apply, true) }}:
+  - task: CmdLine@2
+    displayName: '${{parameters.parm_terraform_main_folder}}: Terraform apply'
+    inputs:
+      script: 'terraform apply -auto-approve'
+      workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_main_folder}}'
+  - task: CmdLine@2
+    displayName: '${{parameters.parm_terraform_main_folder}} to ${{parameters.parm_terraform_post_folder}}: Terraform output'
+    inputs:
+      script: 'terraform output '
+      workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_main_folder}}'
+  - task: CmdLine@2
+    displayName: '${{parameters.parm_terraform_main_folder}} to ${{parameters.parm_terraform_post_folder}}: Terraform output outputs.json file'
+    inputs:
+      script: 'terraform output -json > outputs.json'
+      workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_main_folder}}'
+  - task: PowerShell@2
+    displayName: '${{parameters.parm_terraform_main_folder}} to ${{parameters.parm_terraform_post_folder}}: Converto outputs.json vales to pipeline variables'  
+    inputs:
+      targetType: 'inline'
+      script: |
+        $json = Get-Content '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_main_folder}}/outputs.json' | Out-String | ConvertFrom-Json
+        
+        foreach($prop in $json.psobject.properties) {
+            Write-Host("##vso[task.setvariable variable=$($prop.Name);]$($prop.Value.value)")
+            Write-Host("$($prop.Value.value)")
+        }
+  - task: replacetokens@3
+    displayName: '${{parameters.parm_terraform_post_folder}}:  replacetokens'
+    inputs:
+      targetFiles: "$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_post_folder}}/*.tfvars"
+      encoding: 'auto'
+      writeBOM: true
+      actionOnMissing: 'fail'
+      keepToken: false
+      tokenPrefix: '#{'
+      tokenSuffix: '}#'
+      useLegacyPattern: false
+      enableTelemetry: true 
+    env:
+      SYSTEM_ACCESSTOKEN: $(System.AccessToken) 
+      SYSTEM_COLLECTION_URI: $(System.CollectionUri) 
+  - task: CmdLine@2
+    displayName: '${{parameters.parm_terraform_post_folder}}: Change current folder to ${{parameters.parm_terraform_post_folder}}'
+    inputs:
+      script: 'cd $(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_post_folder}}' 
+  - task: CmdLine@2
+    displayName: '${{parameters.parm_terraform_post_folder}}: Terraform init'
+    inputs:
+      script: 'terraform init'
+      workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_post_folder}}'
+  - task: CmdLine@2
+    displayName: '${{parameters.parm_terraform_post_folder}}: Terraform validate'
+    inputs:
+      script: 'terraform validate'
+      workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_post_folder}}'
+  - task: CmdLine@2
+    displayName: '${{parameters.parm_terraform_post_folder}}: terraform import repo_base'
+    inputs:
+      script: 'terraform import module.repositorio_base[0].azuredevops_git_repository.repo "$(project_name)/$(default_repositorio_base_id)"'
+      workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_post_folder}}'
+    condition: and(succeeded(), eq(variables['create_module_repositorio_base'], 'true'))      
+  - task: CmdLine@2
+    displayName: '${{parameters.parm_terraform_post_folder}}: Terraform plan'
+    inputs:
+      script: 'terraform plan'
+      workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_post_folder}}'
+  - task: CmdLine@2
+    displayName: '${{parameters.parm_terraform_post_folder}}: Terraform apply'
+    inputs:
+      script: 'terraform apply -auto-approve'
+      workingDirectory: '$(System.DefaultWorkingDirectory)/NO-PROD/${{parameters.parm_terraform_post_folder}}'
+  - task: PowerShell@2
+    displayName: Agrega-ServiceConnection
+    env:
+      PROJECT_ID: $(project_id)
+      PROJECT_NAME: $(project_name)
+    inputs:
+      targetType: 'inline'
+      script: |
+        $personalAccessToken = "6vnfqzfj4mzeteveh3lpfez6dbixnlbbgyjcu2iyvjy2imbr7ama"
+        $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$personalAccessToken"))
+        $authHeader = @{
+        'Content-Type'='application/json'
+        'Authorization'="Basic $base64AuthInfo"
+        }
+
+        $BodyAzureDevOpsPaaS = @"
+        [
+
+        {
+        "projectReference": {
+        "id": "$(project_id)",
+        "name": "$(project_name)"
+        },
+        "name": "AzureDevOpsPaaS-$(project_name)"
+        }
+        ]
+        "@
+         
+        Invoke-RestMethod -Uri "https://dev.azure.com/ORG-CRI-GTI/_apis/serviceendpoint/endpoints/faa4e5ba-6ca4-4992-9fa7-b250f49d270c?api-version=7.0" -Method PATCH -Headers $authHeader -Body $BodyAzureDevOpsPaaS -ContentType "application/json"
+
+        $Body_BAC_CR_DESARROLLO_DEVOPS = @"
+        [
+
+        {
+        "projectReference": {
+        "id": "$(project_id)",
+        "name": "$(project_name)"
+        },
+        "name": "BAC CR DESARROLLO DEVOPS-$(project_name)"
+        }
+        ]
+        "@
+
+        Invoke-RestMethod -Uri "https://dev.azure.com/ORG-CRI-GTI/_apis/serviceendpoint/endpoints/bf846fc7-3d74-4ab8-93b5-b9a32f95bcec?api-version=7.0" -Method PATCH -Headers $authHeader -Body $Body_BAC_CR_DESARROLLO_DEVOPS -ContentType "application/json"
+
+        $Body_BAC_CR_PRODUCCION_DEVOPS = @"
+        [
+
+        {
+        "projectReference": {
+        "id": "$(project_id)",
+        "name": "$(project_name)"
+        },
+        "name": "BAC CR PRODUCCION DEVOPS-$(project_name)"
+        }
+        ]
+        "@
+
+        Invoke-RestMethod -Uri "https://dev.azure.com/ORG-CRI-GTI/_apis/serviceendpoint/endpoints/3df2ea80-0893-4698-9861-80530bc0506f?api-version=7.0" -Method PATCH -Headers $authHeader -Body $Body_BAC_CR_PRODUCCION_DEVOPS -ContentType "application/json"
+
+        $Body_BAC_DEVOPS_INTEGRATOR = @"
+        [
+
+        {
+        "projectReference": {
+        "id": "$(project_id)",
+        "name": "$(project_name)"
+        },
+        "name": "BAC DEVOPS INTEGRATOR-$(project_name)"
+        }
+        ]
+        "@
+
+        Invoke-RestMethod -Uri "https://dev.azure.com/ORG-CRI-GTI/_apis/serviceendpoint/endpoints/fe444802-99d0-4fde-8235-e13f39683efb?api-version=7.0" -Method PATCH -Headers $authHeader -Body $Body_BAC_DEVOPS_INTEGRATOR -ContentType "application/json"
+
+        $Body_SONAR_CR_TI = @"
+        [
+
+        {
+        "projectReference": {
+        "id": "$(project_id)",
+        "name": "$(project_name)"
+        },
+        "name": "SONAR CR-TI-$(project_name)"
+        }
+        ]
+        "@
+         
+        Invoke-RestMethod -Uri "https://dev.azure.com/ORG-CRI-GTI/_apis/serviceendpoint/endpoints/7aa7e616-3d92-4b74-8bcf-d4033f4f9fa7?api-version=7.0" -Method PATCH -Headers $authHeader -Body $Body_SONAR_CR_TI -ContentType "application/json"
+
+        $Body_SONARCLOUD = @"
+        [
+
+        {
+        "projectReference": {
+        "id": "$(project_id)",
+        "name": "$(project_name)"
+        },
+        "name": "SONARCLOUD ORG-CRI-GTI-$(project_name)"
+        }
+        ]
+        "@
+        Invoke-RestMethod -Uri "https://dev.azure.com/ORG-CRI-GTI/_apis/serviceendpoint/endpoints/a0f732c8-03e0-4f26-9533-d6d9e362a3d4?api-version=7.0" -Method PATCH -Headers $authHeader -Body $Body_SONARCLOUD -ContentType "application/json"
+
+  - task: PowerShell@2
+    displayName: Pipeline-Permission
+    env:
+      PROJECT_ID: $(project_id)
+      PROJECT_NAME: $(project_name)
+    inputs:
+      targetType: 'inline'
+      script: |
+        $personalAccessToken = "6vnfqzfj4mzeteveh3lpfez6dbixnlbbgyjcu2iyvjy2imbr7ama"
+        $base64AuthInfo = [Convert]::ToBase64String([Text.Encoding]::ASCII.GetBytes(":$personalAccessToken"))
+        $authHeader = @{
+        'Content-Type'='application/json'
+        'Authorization'="Basic $base64AuthInfo"
+          }
+
+        
+        $organization = "ORG-CRI-GTI"
+        $project = "$(project_name)"
+
+        $endpointsUrl = "https://dev.azure.com/$organization/$project/_apis/serviceendpoint/endpoints?api-version=6.0-preview.2" 
+
+        $endpoints = Invoke-RestMethod -Uri $endpointsUrl -Method Get -ContentType "application/json" -Headers $authHeader
+
+        $endpointIds = $endpoints.value | Select-Object id, name
+
+        $pipelinesUrl = "https://dev.azure.com/$organization/$project/_apis/pipelines?api-version=6.0-preview.1"
+
+        $pipelines = Invoke-RestMethod -Uri $pipelinesUrl -Method Get -ContentType "application/json" -Headers $authHeader
+
+        $pipelineIds = $pipelines.value
+
+
+        # API URL
+        $url = "https://dev.azure.com/$organization/$project/_apis/pipelines/pipelinepermissions?api-version=7.1-preview.1" 
+
+        # Create the permission objects
+        $permissions = foreach($pipelineId in $pipelineIds){
+        foreach($endpointId in $endpointIds){
+            $perm = [PSCustomObject]@{
+            resource = [PSCustomObject]@{
+            type = "endpoint"
+            id = $endpointId.id
+            name = $endpointId.name
+            }
+            pipelines = @(
+            @{
+            id = $pipelineId.id
+            authorized = $true
+            }  
+            )
+            }
+
+            $perm
+          }
+          }
+
+          $json = $permissions | ConvertTo-Json -Depth 3
+
+          $permissionResult = Invoke-RestMethod -Uri $url -Method Patch -ContentType "application/json" -Body $json -Headers $authHeader

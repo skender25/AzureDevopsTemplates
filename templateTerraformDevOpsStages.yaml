@@ -1,0 +1,84 @@
+
+parameters:
+- name: parm_user
+  displayName: Email Solicitante
+  type: string
+  default: ' '
+
+stages: 
+- stage: "Terraform_Plan"
+  jobs:
+  - job: "Plan"
+    workspace:
+      clean: all
+    pool:
+      vmImage: 'ubuntu-latest'      
+#    pool: Devops-Desa
+    steps:
+      - template: '../templates/templateTerraformDevOpsTasks.yaml'
+        parameters:
+          parm_apply : false
+  - job: "JIRA"
+    dependsOn: "Plan"
+    pool:
+      vmImage: 'ubuntu-latest'
+    variables:
+    - template: 'yaml-templates/variables/JiraAtlassianVariables.yml@ExternalTemplates'         
+    displayName: JIRA Story
+    timeoutInMinutes: 5
+    steps:    
+    - checkout: ExternalTemplates
+    - template: 'yaml-templates/steps/AddJiraBugTaskV2.yml@ExternalTemplates'
+      parameters:
+        createJiraIssueScriptPath : '$(Build.SourcesDirectory)\scripting-tools\ps-scripts\CreateJiraIssue.ps1'
+        jiraLoginUsername: "${{ variables.jiraLoginUsername }}"
+        jiraLoginPassword: "${{ variables.jiraLoginPassword }}"
+        jiraProjectKey: 'ADVP'
+        jiraSummary: '$(project_name): Solicitud de aplicación de autoservicio en Azure DevOps'
+        jiraDescription: 'Solicitud de revisión y aplicación de autoservicio para el proyecto $(project_name) en Azure DevOps. Favor revisar la ejecución del pipeline $(Build.DefinitionName), el cual ha sido ejecutado en solicitud del usuario $(user). $(System.CollectionUri)/$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'
+    - task: PowerShell@2
+      displayName: 'Task Link'
+      inputs:
+        targetType: 'inline'
+        script: |      
+          Write-Host "$(CreateJiraIssue.jiraIssueUrl)"
+- stage: "Terraform_Apply"
+  dependsOn: "Terraform_Plan"
+  jobs:
+  - deployment: Apply
+    workspace:
+      clean: all
+    pool:
+      vmImage: 'ubuntu-latest'
+#    pool: Devops-Desa
+    environment: AZURE_DEVOPS_SERVICES_PROD
+    strategy:
+      runOnce:
+        deploy:
+          steps:
+          - template: '../templates/templateTerraformDevOpsTasks.yaml'
+            parameters:
+              parm_apply : true
+              user: ${parameters.parm_user}
+
+  - job: "Manual_Tasks"
+    dependsOn: Apply
+    pool: server
+    displayName: Tareas Manuales
+    timeoutInMinutes: 4320
+    steps:
+      - task: ManualValidation@0
+        displayName: Aprobación posterior a Tareas Manuales
+        timeoutInMinutes: 1440 # task times out in 1 day
+        inputs:
+          notifyUsers: '[DEVOPS]\DEVOPS'
+          instructions: 'Seguir las instrucciones de la sección de autoservicio en la Wiki DevOps: https://dev.azure.com/ORG-CRI-GTI/DEVOPS/_wiki/wikis/ProjectWiki/36/DevopsSelfService?anchor=%C2%BFque-caracter%C3%ADsticas-se-siguen-realizando-de-manera-manual-por-el-equipo-devops-despues-de-la-ejecuci%C3%B3n-automatica%3F'
+
+
+    
+
+
+
+
+
+
