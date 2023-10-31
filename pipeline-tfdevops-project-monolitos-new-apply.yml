@@ -1,0 +1,82 @@
+trigger: none
+parameters:
+- name: parm_user
+  displayName: Email Solicitante
+  type: string
+  default: ' '
+- name: parm_project_name
+  displayName: Project Name
+  type: string
+- name: parm_project_description
+  displayName: Project Description
+  type: string
+  default: ' '
+- name: parm_project_prefix
+  displayName: Project Prefix (Si no se indica se utilizara el Project Name)
+  type: string
+  default: ' '
+- name: parm_repos_monolitos
+  displayName: Repositories Molitos 1 por linea, como se muestra. *En caso de que no se haya marcado la opción anterior no se crearan aunque se indiquen los nombres.
+  type: object
+  default:
+    - APP
+    - DATABASE
+    - WEBSERVICE
+- name: parm_user_group_lt
+  displayName: Usuarios grupo LT
+  type: object
+  default:
+      - user1@baccredomatic.cr
+      - user2@baccredomatic.cr
+- name: parm_user_group_po
+  displayName: Usuarios aprobadores grupo PO. Indicar un usuario por linea, como se muestra. *Tienen que ser usuarios válidos y ya existentes en azure devops para no presentar error. En caso de que no se vayan a ingresar aun los usuarios, se deben indicar como null.
+  type: object
+  default:
+      - user1@baccredomatic.cr
+      - user2@baccredomatic.cr
+- name: parm_user_group_developers
+  displayName: Usuarios DevelopersIndicar un usuario por linea, como se muestra. *Tienen que ser usuarios válidos y ya existentes en azure devops para no presentar error. En caso de que no se vayan a ingresar aun los usuarios, se deben indicar como null.
+  type: object
+  default:
+      - user1@baccredomatic.cr
+      - user2@baccredomatic.cr
+
+resources:
+  repositories: 
+  - repository: DevOpsPsScripts
+    type: git
+    name: DEVOPS/DEVOPS-PS-SCRIPTS
+    ref: 'refs/heads/master'
+    endpoint: 'AzureDevOpsPaaS'
+  - repository: ExternalTemplates
+    type: git
+    name: DEVOPS/AZURE-DEVOPS-TEMPLATES
+    ref: 'refs/heads/master'
+    endpoint: 'AzureDevOpsPaaS'  
+
+variables:
+- template: '../templates/defaultNewProjectVariables.yml'
+- name: user
+  value: ${{ upper(parameters.parm_user) }}
+- name: project_name
+  value: ${{ upper(parameters.parm_project_name) }}
+- name: project_description
+  value: ${{ parameters.parm_project_description }}
+- name: project_prefix
+  value: ${{ upper(parameters.parm_project_prefix) }}
+- ${{if parameters.parm_user_group_lt }}:
+  - name: users_lt
+    value: ${{ convertToJson(parameters.parm_user_group_lt) }}
+- ${{if parameters.parm_user_group_po }}:
+  - name: users_po
+    value: ${{ convertToJson(parameters.parm_user_group_po) }}
+- ${{if parameters.parm_user_group_developers }}:
+  - name: users_developers
+    value: ${{ convertToJson(parameters.parm_user_group_developers) }}
+- name: create_module_monolitos
+  value: true
+- name: repos_monolitos
+  value: ${{ convertToJson(parameters.parm_repos_monolitos) }}
+
+stages: 
+- template: '../templates/templateTerraformDevOpsStages.yaml'
